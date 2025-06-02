@@ -4,3 +4,4 @@ requests
 pymupdf
 dotenv
 PyPDF2
+openai
