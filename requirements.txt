@@ -3,3 +3,4 @@ uvicorn
 requests
 pymupdf
 dotenv
+PyPDF2
