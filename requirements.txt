@@ -5,3 +5,4 @@ pymupdf
 dotenv
 PyPDF2
 openai
+python-multipart
