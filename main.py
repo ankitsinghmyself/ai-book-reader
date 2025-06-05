@@ -13,7 +13,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 # Initialize FastAPI app
 app = FastAPI()
 
-# Enable CORS for frontend access
+# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -22,15 +22,15 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# ✅ Request body model
+# ✅ Request schema
 class QuestionRequest(BaseModel):
-    board: str = "UPMSP"
-    classLevel: str = "12"
-    language: str = "hindi"  # From dropdown
-    subject: str = "math"
+    board: str
+    classLevel: str
+    language: str
+    subject: str
     question: str
 
-# ✅ Extract text from PDF file at given path
+# ✅ Extract PDF text
 def extract_text_from_pdf_path(path: str) -> str:
     with open(path, "rb") as f:
         reader = PdfReader(f)
@@ -42,7 +42,7 @@ def extract_text_from_pdf_path(path: str) -> str:
         return text
 
 # ✅ Split large text into chunks
-def split_text(text, max_len=3000):
+def split_text(text: str, max_len: int = 3000) -> list[str]:
     paragraphs = text.split("\n\n")
     chunks = []
     current_chunk = ""
@@ -56,17 +56,30 @@ def split_text(text, max_len=3000):
         chunks.append(current_chunk)
     return chunks
 
-# ✅ Language-based system prompt generator
-def get_system_prompt(language: str, class_level: str) -> str:
+# ✅ Build system prompt based on language
+def build_system_prompt(language: str, class_level: str, book_context: str) -> str:
     language = language.lower()
     if language == "hindi":
-        return f"आप कक्षा {class_level} के एक विशेषज्ञ शिक्षक हैं। कृपया पाठ्यपुस्तक की सामग्री का उपयोग करके प्रश्न का उत्तर हिंदी में दीजिए।"
+        return (
+            f"आप कक्षा {class_level} के एक विशेषज्ञ शिक्षक हैं। "
+            f"पाठ्यपुस्तक की सामग्री का उपयोग करके प्रश्न का उत्तर हिंदी में दीजिए।\n\n"
+            f"यह पाठ्यपुस्तक की सामग्री है:\n{book_context}\n"
+            f"अब छात्र का प्रश्न है:"
+        )
     elif language == "marathi":
-        return f"तुम्ही इयत्ता {class_level} साठी एक तज्ज्ञ शिक्षक आहात. कृपया पाठ्यपुस्तकातील मजकुराचा वापर करून मराठीत उत्तर द्या."
-    elif language == "english":
-        return f"You are an expert teacher for class {class_level}. Use the textbook content to answer the question in English."
-    else:
-        return f"You are a knowledgeable teacher. Answer the question using the textbook content."
+        return (
+            f"तुम्ही इयत्ता {class_level} साठी एक तज्ज्ञ शिक्षक आहात. "
+            f"पाठ्यपुस्तकातील मजकुराचा वापर करून प्रश्नाचे उत्तर मराठीत द्या.\n\n"
+            f"ही पाठ्यपुस्तक सामग्री आहे:\n{book_context}\n"
+            f"आता विद्यार्थ्याचा प्रश्न:"
+        )
+    else:  # Default English
+        return (
+            f"You are an expert teacher for class {class_level}. "
+            f"Use the textbook content to answer the question in English.\n\n"
+            f"Here is the textbook content:\n{book_context}\n"
+            f"Now the student's question is:"
+        )
 
 # ✅ Main API endpoint
 @app.post("/ask")
@@ -77,26 +90,29 @@ async def ask_ai(data: QuestionRequest):
     subject = data.subject
     question = data.question
 
-    # 📚 Book path like: books/board/UPMSP/hindi/class_10/math.pdf
+    # 📘 PDF path
     book_path = f"books/board/{board}/{language}/class_{class_level}/{subject}.pdf"
 
     if not os.path.exists(book_path):
         return {"error": f"Book not found at: {book_path}"}
 
-    # 🧠 Extract and split book content
+    # 🧠 Extract and chunk textbook
     text = extract_text_from_pdf_path(book_path)
     chunks = split_text(text)
+    book_context = "\n".join(chunks[:2])  # you can increase chunk count if needed
 
-    # 🧑‍🏫 Dynamic prompt based on selected language
+    # 🧑‍🏫 System prompt
+    system_prompt = build_system_prompt(language, class_level, book_context)
+
+    # 💬 Messages
     messages = [
-        {"role": "system", "content": get_system_prompt(language, class_level)},
-        {"role": "user", "content": question},
-        {"role": "user", "content": chunks[0]}
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": question}
     ]
 
     try:
         response = openai.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o-mini",  # or gpt-4o
             messages=messages,
             temperature=0.7,
             max_tokens=500
