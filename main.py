@@ -1,19 +1,17 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from PyPDF2 import PdfReader
 import openai
 import os
+import json
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# Initialize FastAPI app
 app = FastAPI()
 
-# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -22,7 +20,6 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
-# ✅ Request schema
 class QuestionRequest(BaseModel):
     board: str
     classLevel: str
@@ -30,33 +27,13 @@ class QuestionRequest(BaseModel):
     subject: str
     question: str
 
-# ✅ Extract PDF text
-def extract_text_from_pdf_path(path: str) -> str:
-    with open(path, "rb") as f:
-        reader = PdfReader(f)
-        text = ""
-        for page in reader.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text + "\n"
-        return text
+def load_chunks_from_cache(board, language, class_level, subject):
+    cache_path = f"cache/{board}_{language}_class{class_level}_{subject}.json"
+    if not os.path.exists(cache_path):
+        return None
+    with open(cache_path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
-# ✅ Split large text into chunks
-def split_text(text: str, max_len: int = 3000) -> list[str]:
-    paragraphs = text.split("\n\n")
-    chunks = []
-    current_chunk = ""
-    for para in paragraphs:
-        if len(current_chunk) + len(para) < max_len:
-            current_chunk += para + "\n\n"
-        else:
-            chunks.append(current_chunk)
-            current_chunk = para + "\n\n"
-    if current_chunk:
-        chunks.append(current_chunk)
-    return chunks
-
-# ✅ Build system prompt based on language
 def build_system_prompt(language: str, class_level: str, book_context: str) -> str:
     language = language.lower()
     if language == "hindi":
@@ -73,7 +50,7 @@ def build_system_prompt(language: str, class_level: str, book_context: str) -> s
             f"ही पाठ्यपुस्तक सामग्री आहे:\n{book_context}\n"
             f"आता विद्यार्थ्याचा प्रश्न:"
         )
-    else:  # Default English
+    else:
         return (
             f"You are an expert teacher for class {class_level}. "
             f"Use the textbook content to answer the question in English.\n\n"
@@ -81,7 +58,6 @@ def build_system_prompt(language: str, class_level: str, book_context: str) -> s
             f"Now the student's question is:"
         )
 
-# ✅ Main API endpoint
 @app.post("/ask")
 async def ask_ai(data: QuestionRequest):
     board = data.board
@@ -90,21 +66,15 @@ async def ask_ai(data: QuestionRequest):
     subject = data.subject
     question = data.question
 
-    # 📘 PDF path
-    book_path = f"books/board/{board}/{language}/class_{class_level}/{subject}.pdf"
+    chunks = load_chunks_from_cache(board, language, class_level, subject)
+    if not chunks:
+        return {"error": "Book data not preprocessed yet. Please run preprocessing script."}
 
-    if not os.path.exists(book_path):
-        return {"error": f"Book not found at: {book_path}"}
+    # Use first 2 chunks for context (adjust if you want)
+    book_context = "\n".join(chunks[:2])
 
-    # 🧠 Extract and chunk textbook
-    text = extract_text_from_pdf_path(book_path)
-    chunks = split_text(text)
-    book_context = "\n".join(chunks[:2])  # you can increase chunk count if needed
-
-    # 🧑‍🏫 System prompt
     system_prompt = build_system_prompt(language, class_level, book_context)
 
-    # 💬 Messages
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": question}
@@ -112,7 +82,7 @@ async def ask_ai(data: QuestionRequest):
 
     try:
         response = openai.chat.completions.create(
-            model="gpt-4o-mini",  # or gpt-4o
+            model="gpt-4o-mini",  # or your preferred model
             messages=messages,
             temperature=0.7,
             max_tokens=500

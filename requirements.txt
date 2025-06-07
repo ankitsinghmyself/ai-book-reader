@@ -6,3 +6,5 @@ dotenv
 PyPDF2
 openai
 python-multipart
+faiss-cpu
+numpy
