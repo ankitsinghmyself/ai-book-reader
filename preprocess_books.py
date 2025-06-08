@@ -1,39 +1,42 @@
 import os
 import json
-from PyPDF2 import PdfReader
+import pdfplumber
+import re
 
 def extract_text_from_pdf_path(path: str) -> str:
-    with open(path, "rb") as f:
-        reader = PdfReader(f)
-        text = ""
-        for page in reader.pages:
+    text = ""
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages:
             page_text = page.extract_text()
             if page_text:
                 text += page_text + "\n"
-        return text
+    return text
 
-def split_text(text: str, max_len: int = 3000) -> list[str]:
-    paragraphs = text.split("\n\n")
+def split_text_by_sentence(text: str, max_len: int = 3000) -> list[str]:
+    sentences = re.split(r'(?<=[.?!])\s+', text)
     chunks = []
     current_chunk = ""
-    for para in paragraphs:
-        if len(current_chunk) + len(para) < max_len:
-            current_chunk += para + "\n\n"
+    for sentence in sentences:
+        if len(current_chunk) + len(sentence) < max_len:
+            current_chunk += sentence + " "
         else:
-            chunks.append(current_chunk)
-            current_chunk = para + "\n\n"
+            chunks.append(current_chunk.strip())
+            current_chunk = sentence + " "
     if current_chunk:
-        chunks.append(current_chunk)
+        chunks.append(current_chunk.strip())
     return chunks
 
 def preprocess_and_save_pdf(book_path: str, cache_path: str):
-    print(f"Processing {book_path} ...")
-    text = extract_text_from_pdf_path(book_path)
-    chunks = split_text(text)
-    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-    with open(cache_path, "w", encoding="utf-8") as f:
-        json.dump(chunks, f, ensure_ascii=False)
-    print(f"✅ Cached: {cache_path}")
+    try:
+        print(f"📘 Processing {book_path} ...")
+        text = extract_text_from_pdf_path(book_path)
+        chunks = split_text_by_sentence(text)
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(chunks, f, ensure_ascii=False)
+        print(f"✅ Cached: {cache_path}")
+    except Exception as e:
+        print(f"❌ Failed to process {book_path}: {e}")
 
 def walk_and_preprocess_books(root_dir="books", cache_dir="cache"):
     for root, _, files in os.walk(root_dir):
@@ -41,16 +44,22 @@ def walk_and_preprocess_books(root_dir="books", cache_dir="cache"):
             if file.endswith(".pdf"):
                 full_path = os.path.join(root, file)
                 parts = full_path.split(os.sep)
-                # Expected path: books/board/CBSE/english/class_10/math.pdf
+
+                # Expected: books/CBSE/english/class_10/math/pdf1.pdf
                 if len(parts) >= 6:
-                    _, _, board, language, class_folder, subject_pdf = parts[-6:]
-                    class_level = class_folder.split("_")[1]
-                    subject = subject_pdf.replace(".pdf", "")
-                    cache_path = os.path.join(
-                        cache_dir,
-                        f"{board}_{language}_class{class_level}_{subject}.json"
-                    )
+                    # unpack last 6 parts:
+                    # books / CBSE / english / class_10 / math / pdf1.pdf
+                    _, board, language, class_folder, subject, pdf_file = parts[-6:]
+
+                    class_level = class_folder.split("_")[1]  # from class_10 get 10
+                    pdf_name = pdf_file.replace(".pdf", "")
+                    subject = subject.lower()
+
+                    cache_file = f"{board}_{language}_class{class_level}_{subject}_{pdf_name}.json"
+                    cache_path = os.path.join(cache_dir, cache_file)
+
                     preprocess_and_save_pdf(full_path, cache_path)
+
 
 if __name__ == "__main__":
     walk_and_preprocess_books()

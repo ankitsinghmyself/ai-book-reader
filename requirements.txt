@@ -8,3 +8,4 @@ openai
 python-multipart
 faiss-cpu
 numpy
+google-generativeai

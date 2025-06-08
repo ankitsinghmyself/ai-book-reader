@@ -1,14 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import openai
 import os
 import json
 from dotenv import load_dotenv
 
+import google.generativeai as genai  # ✅ Gemini import
+
 # Load environment variables
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))  # ✅ Use Gemini key
+
 
 app = FastAPI()
 
@@ -28,11 +30,14 @@ class QuestionRequest(BaseModel):
     question: str
 
 def load_chunks_from_cache(board, language, class_level, subject):
-    cache_path = f"cache/{board}_{language}_class{class_level}_{subject}.json"
-    if not os.path.exists(cache_path):
-        return None
-    with open(cache_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    prefix = f"{board}_{language}_class{class_level}_{subject}_"
+    for filename in os.listdir("cache"):
+        if filename.startswith(prefix) and filename.endswith(".json"):
+            cache_path = os.path.join("cache", filename)
+            with open(cache_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    return None
+
 
 def build_system_prompt(language: str, class_level: str, book_context: str) -> str:
     language = language.lower()
@@ -70,24 +75,14 @@ async def ask_ai(data: QuestionRequest):
     if not chunks:
         return {"error": "Book data not preprocessed yet. Please run preprocessing script."}
 
-    # Use first 2 chunks for context (adjust if you want)
-    book_context = "\n".join(chunks[:2])
-
+    # Use first 2 chunks for context (adjust as needed)
+    book_context = "\n".join(chunks)
     system_prompt = build_system_prompt(language, class_level, book_context)
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": question}
-    ]
-
     try:
-        response = openai.chat.completions.create(
-            model="gpt-4o-mini",  # or your preferred model
-            messages=messages,
-            temperature=0.7,
-            max_tokens=500
-        )
-        answer = response.choices[0].message.content.strip()
-        return {"answer": answer}
+        model = genai.GenerativeModel("gemini-1.5-flash")  # Or "gemini-1.5-pro"
+        convo = model.start_chat()
+        convo.send_message(f"{system_prompt}\n\n{question}")
+        return {"answer": convo.last.text.strip()}
     except Exception as e:
         return {"error": str(e)}
