@@ -10,5 +10,9 @@ pip install -r requirements.txt
 ## Build vector indexes
 python build_all_vector_indexes.py
 
+
+## load books in json format
+python preprocess_books.py;
+
 ## Run the server
 uvicorn main:app --reload
