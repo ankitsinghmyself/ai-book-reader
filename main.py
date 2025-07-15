@@ -1,19 +1,21 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import os
-import json
 from dotenv import load_dotenv
 
-import google.generativeai as genai  # ✅ Gemini import
+import os
+import json
+import pickle
+import faiss
+from sentence_transformers import SentenceTransformer
+import google.generativeai as genai
 
 # Load environment variables
 load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))  # ✅ Use Gemini key
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
-
+# FastAPI setup
 app = FastAPI()
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,6 +24,7 @@ app.add_middleware(
     allow_headers=["*"]
 )
 
+# Request model
 class QuestionRequest(BaseModel):
     board: str
     classLevel: str
@@ -29,16 +32,27 @@ class QuestionRequest(BaseModel):
     subject: str
     question: str
 
-def load_chunks_from_cache(board, language, class_level, subject):
-    prefix = f"{board}_{language}_class{class_level}_{subject}_"
-    for filename in os.listdir("cache"):
-        if filename.startswith(prefix) and filename.endswith(".json"):
-            cache_path = os.path.join("cache", filename)
-            with open(cache_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-    return None
+# Embedding model (shared instance)
+embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
 
+# 🔍 Semantic search function
+def search_semantic_chunks(board, language, class_level, subject, question, top_k=3):
+    prefix = f"{board}_{language}_class{class_level}_{subject}"
+    index_path = f"vector_index/{prefix}.index"
+    chunks_path = f"vector_index/{prefix}_chunks.pkl"
 
+    if not os.path.exists(index_path) or not os.path.exists(chunks_path):
+        return None
+
+    index = faiss.read_index(index_path)
+    with open(chunks_path, "rb") as f:
+        chunks = pickle.load(f)
+
+    q_embedding = embedding_model.encode([question])
+    _, indices = index.search(q_embedding, top_k)
+    return [chunks[i] for i in indices[0]]
+
+# 🧠 Prompt builder
 def build_system_prompt(language: str, class_level: str, book_context: str) -> str:
     language = language.lower()
     if language == "hindi":
@@ -63,6 +77,7 @@ def build_system_prompt(language: str, class_level: str, book_context: str) -> s
             f"Now the student's question is:"
         )
 
+# 🚀 Main API endpoint
 @app.post("/ask")
 async def ask_ai(data: QuestionRequest):
     board = data.board
@@ -71,18 +86,16 @@ async def ask_ai(data: QuestionRequest):
     subject = data.subject
     question = data.question
 
-    chunks = load_chunks_from_cache(board, language, class_level, subject)
+    chunks = search_semantic_chunks(board, language, class_level, subject, question)
     if not chunks:
-        return {"error": "Book data not preprocessed yet. Please run preprocessing script."}
+        return {"error": "Vector index not found. Please run the vector indexing script."}
 
-    # Use first 2 chunks for context (adjust as needed)
     book_context = "\n".join(chunks)
     system_prompt = build_system_prompt(language, class_level, book_context)
 
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")  # Or "gemini-1.5-pro"
-        convo = model.start_chat()
-        convo.send_message(f"{system_prompt}\n\n{question}")
-        return {"answer": convo.last.text.strip()}
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content(f"{system_prompt}\n\n{question}")
+        return {"answer": response.text.strip()}
     except Exception as e:
         return {"error": str(e)}

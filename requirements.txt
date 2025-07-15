@@ -9,3 +9,6 @@ python-multipart
 faiss-cpu
 numpy
 google-generativeai
+sentence-transformers==2.2.2
+huggingface_hub==0.14.1
+transformers==4.30.2
