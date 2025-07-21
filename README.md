@@ -7,7 +7,8 @@ python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
 
-## Build vector indexes
+## Build cache and vector indexes
+python preprocess_books.py
 python build_all_vector_indexes.py
 
 

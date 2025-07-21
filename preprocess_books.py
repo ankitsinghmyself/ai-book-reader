@@ -47,18 +47,22 @@ def walk_and_preprocess_books(root_dir="books", cache_dir="cache"):
 
                 # Expected: books/CBSE/english/class_10/math/pdf1.pdf
                 if len(parts) >= 6:
-                    # unpack last 6 parts:
-                    # books / CBSE / english / class_10 / math / pdf1.pdf
                     _, board, language, class_folder, subject, pdf_file = parts[-6:]
 
-                    class_level = class_folder.split("_")[1]  # from class_10 get 10
+                    class_level = class_folder.split("_")[1]
                     pdf_name = pdf_file.replace(".pdf", "")
                     subject = subject.lower()
 
                     cache_file = f"{board}_{language}_class{class_level}_{subject}_{pdf_name}.json"
                     cache_path = os.path.join(cache_dir, cache_file)
 
+                    # ✅ Skip if already cached
+                    if os.path.exists(cache_path):
+                        print(f"⚠️ Skipping (already cached): {cache_path}")
+                        continue
+
                     preprocess_and_save_pdf(full_path, cache_path)
+
 
 
 if __name__ == "__main__":

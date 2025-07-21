@@ -2,6 +2,7 @@ fastapi
 uvicorn
 requests
 pymupdf
+pdfplumber
 dotenv
 PyPDF2
 openai
